@@ -8,6 +8,7 @@ import torch
 import torch.nn as nn
 from torch.utils.data import Dataset, DataLoader
 from torch.optim import Adam
+from sklearn.metrics import roc_auc_score
 from datetime import datetime
 from tqdm import tqdm
 
@@ -150,6 +151,30 @@ def train(model, optimizer, dataloader, criterion, device):
     
     return total_loss/len(dataloader)
 
+def cal_auc_score(model, df, sample_user_ids, all_items, device):    
+    grnd_truth = []
+    scores = []
+    
+    for user_id in tqdm(sample_user_ids):
+        user_df = df[df.customer_id==user_id]
+        pos_ids = np.array(user_df.article_id)
+        neg_ids = np.setdiff1d(all_items, pos_ids) # unobs item 집합
+        np.random.shuffle(neg_ids)
+        
+        pos_ids = torch.tensor(pos_ids).to(device)
+        neg_ids = torch.tensor(neg_ids[:len(pos_ids)]).to(device) # 새롭게 neg sampling
+        user_ids = torch.tensor(np.full(len(pos_ids), user_id)).to(device)
+        
+        pos_pred, _ = model.cal_each(user_ids, pos_ids)
+        neg_pred, _ = model.cal_each(user_ids, neg_ids)
+        pred = pos_pred.tolist() + neg_pred.tolist()
+        
+        grnd_truth = np.zeros(2*len(pos_ids), dtype=np.int32)
+        grnd_truth[:len(pos_ids)] = 1
+        scores.append(roc_auc_score(grnd_truth, pred))
+    
+    return sum(scores)/len(scores)
+
 def seed_everything(seed: int = 42):
     os.environ["PYTHONHASHSEED"] = str(seed)
     random.seed(seed)
@@ -169,6 +194,7 @@ def main():
     reg_e = 0
     lr = 0.001
     epoch = 15
+    batch_size = 512
     
     print("--------------- Wandb Setting ---------------")
     timestamp = get_timestamp()
@@ -185,27 +211,33 @@ def main():
         "learning_rate": lr,
         "model": "vbpr",
         "dataset": "len cut 7",
+        "sample_size" : "(n_user//100)*3",
         "epochs": epoch,
         "K" : K,
         "D" : D,
         "reg_theta" : reg_theta,
         "reg_beta" : reg_beta,
-        "reg_e" : reg_e
+        "reg_e" : reg_e,
+        "batch_size" : batch_size
         })
     
     # get img emb
+    print("-------------LOAD IMAGE EMBEDDING-------------")
     img_emb = pd.read_csv("./data/img_emb.csv")
     img_emb = torch.tensor(img_emb.values)
     
     # load dataset
+    print("-------------LOAD DATASET-------------")
     train_dataset = torch.load("./dataset/train_dataset.pt")
-    test_dataset = torch.load("./dataset/test_dataset.pt")
-    batch_size = 256
+    # test_dataset = torch.load("./dataset/test_dataset.pt")
     train_dataloader = DataLoader(train_dataset, batch_size=batch_size)
     
-    # set hyper parameters
+    # setting for training 
     n_user = train_dataset.n_user
     n_item = train_dataset.n_item
+    sample_size = (n_user//100)*3
+    sample_user_ids = np.random.choice(n_user, sample_size, replace=False) # 유저 샘플링
+    all_items = np.arange(n_item, dtype=np.int32)
 
     device = "cuda" if torch.cuda.is_available() else "cpu" 
     criterion = BPRLoss(reg_theta, reg_beta, reg_e).to(device)
@@ -215,11 +247,14 @@ def main():
     vbpr = VBPR(n_user, n_item, K, D, img_emb).to(device)
     optimizer = Adam(params = vbpr.parameters(), lr=lr)
     train_loss = []
+    train_auc = []
 
     for i in range(epoch):
         train_loss.append(train(vbpr, optimizer, train_dataloader, criterion, device))
-        print(f'EPOCH : {i} | LOSS : {train_loss[-1]:.10}')
-        wandb.log({"train-loss":train_loss[-1], "epoch": i+1})
+        train_auc.append(cal_auc_score(vbpr, train_dataset.df, sample_user_ids, all_items, device))
+        
+        print(f'EPOCH : {i} | AUC : {train_auc[-1]:.6} | LOSS : {train_loss[-1]:.6}')
+        wandb.log({"train-auc":train_auc[-1] ,"train-loss":train_loss[-1], "epoch": i+1})
     
     torch.save(vbpr.state_dict(), "./model/"+name+".pt")
     wandb.save("./model/"+name+".pt")
