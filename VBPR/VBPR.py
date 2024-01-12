@@ -175,6 +175,23 @@ def cal_auc_score(model, df, sample_user_ids, all_items, device):
     
     return sum(scores)/len(scores)
 
+class EarlyStopper:
+    def __init__(self, patience=4, min_delta=0.001):
+        self.patience = patience
+        self.min_delta = min_delta
+        self.counter = 0
+        self.min_loss = float('inf')
+
+    def early_stop(self, loss):
+        if loss < self.min_loss:
+            self.min_loss = loss
+            self.counter = 0
+        elif loss > (self.min_loss + self.min_delta):
+            self.counter += 1
+            if self.counter >= self.patience:
+                return True
+        return False
+
 def seed_everything(seed: int = 42):
     os.environ["PYTHONHASHSEED"] = str(seed)
     random.seed(seed)
@@ -246,6 +263,8 @@ def main():
     # training
     vbpr = VBPR(n_user, n_item, K, D, img_emb).to(device)
     optimizer = Adam(params = vbpr.parameters(), lr=lr)
+    early_stopper = EarlyStopper()
+
     train_loss = []
     train_auc = []
 
@@ -255,6 +274,10 @@ def main():
         
         print(f'EPOCH : {i} | AUC : {train_auc[-1]:.6} | LOSS : {train_loss[-1]:.6}')
         wandb.log({"train-auc":train_auc[-1] ,"train-loss":train_loss[-1], "epoch": i+1})
+        
+        if early_stopper.early_stop(train_auc[-1]):
+            print("-------------EARLY STOPPING-------------")
+            break
     
     torch.save(vbpr.state_dict(), "./model/"+name+".pt")
     wandb.save("./model/"+name+".pt")
