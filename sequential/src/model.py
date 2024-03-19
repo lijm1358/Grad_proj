@@ -242,7 +242,7 @@ class MLPBERT4Rec(nn.Module):
 
     def forward(self, log_seqs, labels):
         seqs = self.item_emb(log_seqs).to(self.device)
-
+        breakpoint()
         if self.pos_emb:
             positions = np.tile(np.array(range(log_seqs.shape[1])), [log_seqs.shape[0], 1])
             seqs += self.positional_emb(torch.tensor(positions).to(self.device))
@@ -251,7 +251,7 @@ class MLPBERT4Rec(nn.Module):
         mask = (log_seqs > 0).unsqueeze(1).repeat(1, log_seqs.shape[1], 1).unsqueeze(1).to(self.device)
         for block in self.bert:
             seqs, _ = block(seqs, mask)
-
+        breakpoint()
         item_ids = log_seqs.clone().detach()
         mask_index = torch.where(item_ids == self.num_item + 1)  # mask 찾기
         item_ids[mask_index] = labels[mask_index]  # mask의 본래 아이템 번호 찾기
@@ -260,6 +260,7 @@ class MLPBERT4Rec(nn.Module):
         gen_imgs = torch.flatten(self.gen_img_emb[item_ids - 1][:, :, img_idx, :], start_dim=-2, end_dim=-1)
         mlp_in = torch.concat([seqs, gen_imgs], dim=-1)
         out = self.out(self.MLP(mlp_in))
+        breakpoint()
         return out
 
 

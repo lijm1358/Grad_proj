@@ -1,6 +1,7 @@
 import numpy as np
 import torch
 from src.model import BERT4Rec, BERT4RecWithHF, MLPBERT4Rec
+from src.cross_model import CrossBERT4Rec
 from src.utils import ndcg_at_k, recall_at_k, simple_ndcg_at_k, simple_recall_at_k
 from tqdm import tqdm
 
@@ -13,7 +14,7 @@ def train(model, optimizer, scheduler, dataloader, criterion, device):
         tokens = tokens.to(device)
         labels = labels.to(device)
 
-        if isinstance(model, (MLPBERT4Rec)):
+        if isinstance(model, (MLPBERT4Rec, CrossBERT4Rec)):
             logits = model(tokens, labels)
         if isinstance(model, (BERT4Rec, BERT4RecWithHF)):
             logits = model(tokens)
@@ -55,7 +56,7 @@ def eval(
             users = users.to(device)
             pred_list = []
 
-            if isinstance(model, (MLPBERT4Rec)):
+            if isinstance(model, (MLPBERT4Rec, CrossBERT4Rec)):
                 logits = model(tokens, labels)
             if isinstance(model, (BERT4Rec, BERT4RecWithHF)):
                 logits = model(tokens)
